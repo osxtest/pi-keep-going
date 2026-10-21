@@ -1,4 +1,5 @@
 import type { ResetInfo } from "./types";
+import { spawnSync } from "node:child_process";
 
 /**
  * Usage-limit detection from a settled error, decoupled from Pi types so it is
@@ -36,7 +37,7 @@ export interface UsageLimit {
 const CACHED_429_MAX_AGE_MS = 10 * 60 * 1000;
 
 export function providerFamily(provider: string): ProviderFamily | null {
-  if (provider === "openai-codex") return "codex";
+  if (provider === "openai-codex" || provider === "openai") return "codex";
   if (provider === "anthropic") return "anthropic";
   if (provider === "google" || provider === "google-gemini-cli") return "gemini";
   return null;
@@ -82,6 +83,7 @@ function freshHeaders(input: DetectInput): Record<string, string> | null {
 function detectCodex(message: string, status: number | undefined, now: number): UsageLimit | null {
   const isLimit =
     /hit your ChatGPT usage limit/i.test(message) ||
+    /The ChatGPT user has reached their Subscription Sharing usage limit/i.test(message) ||
     /(usage_limit_reached|usage_not_included|rate_limit_exceeded)/i.test(message) ||
     status === 429;
   if (!isLimit) return null;
@@ -93,6 +95,44 @@ function detectCodex(message: string, status: number | undefined, now: number): 
       reset: { at: new Date(now + Number(minutes[1]) * 60_000), source: "body" },
     };
   }
+
+  if (/The ChatGPT user has reached their Subscription Sharing usage limit/i.test(message)) {
+    // Fallback: ask Codex CLI for the reset time
+    try {
+      const result = spawnSync(
+        "codex",
+        ["exec", "foo", "--skip-git-repo-check"],
+        { encoding: "utf8", timeout: 15_000 },
+      );
+
+      // ERROR: You’ve hit your usage limit. Upgrade ... or try again at 1:55 PM.
+      const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+      const match = output.match(
+        /try again at\s+(\d{1,2}):(\d{2})\s*(AM|PM)/i,
+      );
+
+      if (match) {
+        const hour =
+          (Number(match[1]) % 12) +
+          (match[3].toUpperCase() === "PM" ? 12 : 0);
+
+        const resetAt = new Date(now);
+        resetAt.setHours(hour, Number(match[2]), 0, 0);
+
+        if (resetAt.getTime() <= now) {
+          resetAt.setDate(resetAt.getDate() + 1);
+        }
+
+        return {
+          provider: "codex",
+          reset: { at: resetAt, source: "body" },
+        };
+      }
+    } catch {
+      // Fallback when command execution fails
+    }
+  }
+
   return { provider: "codex", reset: null };
 }
 
