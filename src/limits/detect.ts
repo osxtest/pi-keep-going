@@ -106,21 +106,49 @@ function detectCodex(message: string, status: number | undefined, now: number): 
       );
 
       // ERROR: You’ve hit your usage limit. Upgrade ... or try again at 1:55 PM.
+      // Or: try again at Oct 27th, 2026 6:57 AM
       const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
       const match = output.match(
-        /try again at\s+(\d{1,2}):(\d{2})\s*(AM|PM)/i,
+        /try again at\s+(?:(\w+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\s+)?(\d{1,2}):(\d{2})\s*(AM|PM)/i,
       );
 
       if (match) {
+        const [, month, day, year, hh, mm, period] = match;
+
         const hour =
-          (Number(match[1]) % 12) +
-          (match[3].toUpperCase() === "PM" ? 12 : 0);
+          (Number(hh) % 12) +
+          (period.toUpperCase() === "PM" ? 12 : 0);
 
-        const resetAt = new Date(now);
-        resetAt.setHours(hour, Number(match[2]), 0, 0);
+        let resetAt: Date;
 
-        if (resetAt.getTime() <= now) {
-          resetAt.setDate(resetAt.getDate() + 1);
+        if (month && day && year) {
+          const months = [
+            "jan", "feb", "mar", "apr", "may", "jun",
+            "jul", "aug", "sep", "oct", "nov", "dec",
+          ];
+
+          const monthIndex = months.indexOf(
+            month.slice(0, 3).toLowerCase(),
+          );
+
+          if (monthIndex === -1) {
+            throw new Error(`Invalid month: ${month}`);
+          }
+
+          resetAt = new Date(
+            Number(year),
+            monthIndex,
+            Number(day),
+            hour,
+            Number(mm),
+          );
+        } else {
+          resetAt = new Date(now);
+          resetAt.setHours(hour, Number(mm), 0, 0);
+
+          if (resetAt.getTime() <= now) {
+            resetAt.setDate(resetAt.getDate() + 1);
+          }
         }
 
         return {
