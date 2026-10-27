@@ -101,7 +101,9 @@ function detectCodex(message: string, status: number | undefined, now: number): 
     try {
       const result = spawnSync(
         "codex",
-        ["exec", "foo", "--skip-git-repo-check"],
+        ["exec", "foo", "--skip-git-repo-check",
+        // Use a high cost config in case it doesn't hit usage limit.
+        "--model", "gpt-6-astra", "--config", "model_reasoning_effort=\"max\""],
         { encoding: "utf8", timeout: 15_000 },
       );
 
